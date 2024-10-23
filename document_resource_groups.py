@@ -219,7 +219,7 @@ def generate_markdown_for_resource_group(rg_dir, resource_group_name):
 
     front_matter = generate_front_matter(resource_group_name, azure_tags)
 
-    markdown_file = os.path.join(rg_dir, "summary.md")
+    markdown_file = os.path.join(rg_dir, f"{resource_group_name}.md")
 
     with open(markdown_file, "w") as md:
         md.write(front_matter)
@@ -291,11 +291,11 @@ def process_all_resource_groups():
             rg_dir = os.path.join(output_dir, rg)
 
             template_path = os.path.exists(os.path.join(rg_dir, "template.json"))
-            markdown_path = os.path.exists(os.path.join(rg_dir, "summary.md"))
+            markdown_path = os.path.exists(os.path.join(rg_dir, f"{rg}.md"))
 
             if template_path and markdown_path:
                 logging.info(
-                    f"Both template.json and summary.md already exist for resource group: {rg}, skipping."
+                    f"Both template.json and {rg}.md already exist for resource group: {rg}, skipping."
                 )
                 continue
 
