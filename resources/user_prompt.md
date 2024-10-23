@@ -10,6 +10,8 @@ Make sure all sections are properly filled with the information extracted from t
 
 The documentation should follow this template:
 
+# Resource Group: {resource_group_name}
+
 ## Overview
 
 Provide a brief overview of the resource group and its purpose.
