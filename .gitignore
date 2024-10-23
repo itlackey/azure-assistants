@@ -2,3 +2,4 @@
 .venv
 copy.sh
 arm_templates
+.DS_Store

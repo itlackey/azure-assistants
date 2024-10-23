@@ -25,7 +25,6 @@ if not api_key:
     logging.error("API key is not set. Please set it in the .env file.")
     sys.exit(1)
 
-
 def create_openai_client():
     api_key = os.getenv("OPENAI_API_KEY")
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -50,6 +49,15 @@ client = create_openai_client()
 OUTPUT_DIR = "./arm_templates"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Function to read content from a text file
+def read_text_file(file_path):
+    with open(file_path, 'r') as file:
+        return file.read().strip()
+
+# Load system message and user prompt from external files
+system_message = read_text_file("resources/system_message.md")
+user_prompt_template = read_text_file("resources/user_prompt.md")
+
 # Function to extract tags from the ARM template's resources and format them as a dictionary
 def extract_tags(template_content):
     tags_dict = {}
@@ -71,8 +79,14 @@ def get_summary(template_file, resource_group_name, retry_count=3):
     azure_tags = extract_tags(template_content)
 
     messages = [
-        { "role": "system", "content": "You are an senior cloud architect that specializes in documenting Azure cloud resources based on Azure ARM templates."},
-        { "role": "user", "content": f"Provide a detailed markdown reference document of the following ARM template for resource group {resource_group_name}: {json.dumps(template_content)}"}
+        { "role": "system", "content": system_message},
+        { 
+            "role": "user", 
+            "content": user_prompt_template.format(
+                resource_group_name=resource_group_name, 
+                template_content=json.dumps(template_content)
+            ) 
+        }
     ]
 
     # Retry mechanism for API call
@@ -165,7 +179,7 @@ def generate_markdown_for_resource_group(rg_dir, resource_group_name):
     with open(markdown_file, 'w') as md:
         md.write(front_matter)
         md.write(f"# Resource Group: {resource_group_name}\n\n")
-        md.write(f"**Summary**:\n\n{summary}\n")
+        md.write(summary)
 
     logging.info(f"Markdown summary saved to {markdown_file}")
 
@@ -183,15 +197,16 @@ def process_all_resource_groups():
             rg_dir = os.path.join(OUTPUT_DIR, rg)
 
             template_path = os.path.join(rg_dir, "template.json")
-            markdown_path = os.path.join(rg_dir, "summary.md")
+            markdown_path = os.path.exists(os.path.join(rg_dir, "summary.md"))
 
-            if os.path.exists(template_path) and os.path.exists(markdown_path):
+            if os.path.exists(template_path) and markdown_path:
                 logging.info(f"Both template.json and summary.md already exist for resource group: {rg}, skipping.")
                 continue
 
             rg_dir = export_template(rg, OUTPUT_DIR)
             if rg_dir:
-                generate_markdown_for_resource_group(rg_dir, rg)
+                if not markdown_path:
+                    generate_markdown_for_resource_group(rg_dir, rg)
 
     except subprocess.CalledProcessError as e:
         logging.error(f"Error listing resource groups: {e}")
