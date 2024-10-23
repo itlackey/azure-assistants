@@ -1,0 +1,4 @@
+.env
+.venv
+copy.sh
+arm_templates
