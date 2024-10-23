@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # Fetch the API configuration from environment variables
 api_base_url = os.getenv("OPENAI_API_BASE_URL")
 api_key = os.getenv("OPENAI_API_KEY")
-model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")  # Default to "gpt-3.5-turbo" if not set
+model = os.getenv("OPENAI_MODEL", "gpt-4o")  # Default to "gpt-3.5-turbo" if not set
 
 # # Validate API settings
 if not api_key:
@@ -29,7 +29,7 @@ if not api_key:
 def create_openai_client():
     api_key = os.getenv("OPENAI_API_KEY")
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    azure_deployment= os.getenv("AZURE_DEPLOYMENT")
+    azure_deployment = os.getenv("AZURE_DEPLOYMENT")
     api_version = os.getenv("API_VERSION")
     
     if azure_endpoint:
@@ -45,7 +45,6 @@ def create_openai_client():
         return OpenAI(api_key=api_key)
 
 client = create_openai_client()
-
 
 # Directory to store all resource group folders
 OUTPUT_DIR = "./arm_templates"
@@ -72,8 +71,8 @@ def get_summary(template_file, resource_group_name, retry_count=3):
     azure_tags = extract_tags(template_content)
 
     messages = [
-        { "role": "system", "content": "You are a helpful assistant who provides summaries of Azure ARM templates."},
-        { "role": "user", "content": f"Provide a detailed markdown summary of the following ARM template for resource group {resource_group_name}: {json.dumps(template_content)}"}
+        { "role": "system", "content": "You are an senior cloud architect that specializes in documenting Azure cloud resources based on Azure ARM templates."},
+        { "role": "user", "content": f"Provide a detailed markdown reference document of the following ARM template for resource group {resource_group_name}: {json.dumps(template_content)}"}
     ]
 
     # Retry mechanism for API call
@@ -91,7 +90,6 @@ def get_summary(template_file, resource_group_name, retry_count=3):
 
     logging.error(f"Failed to generate summary after {retry_count} attempts for resource group {resource_group_name}.")
     return None, None
-
 
 # Function to generate front matter for markdown
 def generate_front_matter(resource_group_name, azure_tags):
@@ -182,6 +180,15 @@ def process_all_resource_groups():
             return
 
         for rg in resource_groups:
+            rg_dir = os.path.join(OUTPUT_DIR, rg)
+
+            template_path = os.path.join(rg_dir, "template.json")
+            markdown_path = os.path.join(rg_dir, "summary.md")
+
+            if os.path.exists(template_path) and os.path.exists(markdown_path):
+                logging.info(f"Both template.json and summary.md already exist for resource group: {rg}, skipping.")
+                continue
+
             rg_dir = export_template(rg, OUTPUT_DIR)
             if rg_dir:
                 generate_markdown_for_resource_group(rg_dir, rg)
