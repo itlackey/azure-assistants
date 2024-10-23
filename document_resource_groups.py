@@ -4,11 +4,10 @@ import logging
 import subprocess
 from datetime import datetime
 import sys
+import time
 from dotenv import load_dotenv
 
-from openai import OpenAI
-
-
+from openai import OpenAI, AzureOpenAI
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,14 +20,32 @@ api_base_url = os.getenv("OPENAI_API_BASE_URL")
 api_key = os.getenv("OPENAI_API_KEY")
 model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")  # Default to "gpt-3.5-turbo" if not set
 
-# Validate API settings
-if not api_base_url or not api_key:
-    logging.error("OpenAI API base URL or API key is not set. Please set it in the .env file.")
+# # Validate API settings
+if not api_key:
+    logging.error("API key is not set. Please set it in the .env file.")
     sys.exit(1)
 
-# Set OpenAI API base URL and key if using OpenAI's API or a compatible endpoint
-# TODO: The 'openai.api_base' option isn't read in the client API. You will need to pass it when you instantiate the client, e.g. 'OpenAI(base_url=api_base_url)'
-# openai.api_base = api_base_url
+
+def create_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_deployment= os.getenv("AZURE_DEPLOYMENT")
+    api_version = os.getenv("API_VERSION")
+    
+    if azure_endpoint:
+        logging.info("Using Azure Open AI Endpoint...")
+        return AzureOpenAI(
+            api_version=api_version,
+            azure_deployment=azure_deployment,
+            azure_endpoint=azure_endpoint,
+            azure_ad_token_provider=None,
+            api_key=api_key
+        )
+    else:
+        return OpenAI(api_key=api_key)
+
+client = create_openai_client()
+
 
 # Directory to store all resource group folders
 OUTPUT_DIR = "./arm_templates"
@@ -48,19 +65,11 @@ def extract_tags(template_content):
 
 # Function to send the ARM template and parameters to OpenAI-compatible API and get the summary
 def get_summary(template_file, resource_group_name, retry_count=3):
-    # Get base URL from environment variable
-    base_url = os.environ.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1")
-    model = os.environ["OPENAI_MODEL"]
+
     with open(template_file, 'r') as tf:
         template_content = json.load(tf)
 
     azure_tags = extract_tags(template_content)
-
-    client = OpenAI(
-        # This is the default and can be omitted
-        api_key=os.environ.get("OPENAI_API_KEY"),
-        base_url=base_url
-    )
 
     messages = [
         { "role": "system", "content": "You are a helpful assistant who provides summaries of Azure ARM templates."},
@@ -70,27 +79,15 @@ def get_summary(template_file, resource_group_name, retry_count=3):
     # Retry mechanism for API call
     for attempt in range(retry_count):
         try:
-           
             # Make the API call
             response = client.chat.completions.create(
                 model=model,
-                messages=messages,
-                # max_tokens=3000,
-                # temperature=0.7,
-                # top_p=1,
-                # n=1,
-                # stream=False
+                messages=messages
             )
-
-            # Parse the response
-            #parsed_response = ChatCompletionCreateResponse.from_dict(response)
-            
             return response.choices[0].message.content, azure_tags
-        # except OpenAIException as e:
-        #     logging.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-        #     time.sleep(2 ** attempt)  # Exponential backoff
         except Exception as e:
             logging.error(f"Unexpected error occurred: {str(e)}")
+            time.sleep(2 ** attempt)  # Exponential backoff
 
     logging.error(f"Failed to generate summary after {retry_count} attempts for resource group {resource_group_name}.")
     return None, None
@@ -118,6 +115,12 @@ def export_template(resource_group_name, output_dir):
     rg_dir = os.path.join(output_dir, resource_group_name)
     os.makedirs(rg_dir, exist_ok=True)
 
+    # Check if the template file already exists
+    template_path = os.path.join(rg_dir, "template.json")
+    if os.path.exists(template_path):
+        logging.info(f"Template already exists for resource group: {resource_group_name}, skipping export.")
+        return rg_dir  # Return the existing directory
+
     logging.info(f"Exporting ARM template for resource group: {resource_group_name}")
 
     export_command = [
@@ -128,14 +131,14 @@ def export_template(resource_group_name, output_dir):
     ]
 
     try:
-        with open(f"{rg_dir}/template.json", 'w') as template_file:
+        with open(template_path, 'w') as template_file:
             result = subprocess.run(export_command, stdout=template_file, stderr=subprocess.PIPE, text=True)
 
         if result.returncode != 0:
             logging.error(f"Failed to export template for resource group: {resource_group_name}. {result.stderr}")
             return None
         else:
-            logging.info(f"ARM template exported to {rg_dir}/template.json")
+            logging.info(f"ARM template exported to {template_path}")
             return rg_dir
     except subprocess.CalledProcessError as e:
         logging.error(f"Error exporting ARM template for {resource_group_name}: {e}")
