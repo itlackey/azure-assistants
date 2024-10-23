@@ -5,6 +5,7 @@ import subprocess
 from datetime import datetime
 import sys
 import time
+import re
 from dotenv import load_dotenv
 
 from openai import OpenAI, AzureOpenAI
@@ -50,7 +51,7 @@ def create_openai_client():
 client = create_openai_client()
 
 # Directory to store all resource group folders
-OUTPUT_DIR = "./arm_templates"
+OUTPUT_DIR = "./output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -100,7 +101,7 @@ def get_summary(template_file, resource_group_name, retry_count=3):
         "Microsoft.DBforMySQL/flexibleServers/backups",
         "Microsoft.DBforMySQL/flexibleServers/backupsv2",
         "Microsoft.DBforMySQL/flexibleServers/configurations",
-        "Microsoft.Web/sites/deployments"
+        "Microsoft.Web/sites/deployments",
     ]
     filtered_template_content = filter_resources(
         template_content, excluded_resource_types
@@ -222,15 +223,45 @@ def generate_markdown_for_resource_group(rg_dir, resource_group_name):
 
     with open(markdown_file, "w") as md:
         md.write(front_matter)
-        # md.write(f"# Resource Group: {resource_group_name}\n\n")
         md.write(summary)
 
     logging.info(f"Markdown summary saved to {markdown_file}")
 
 
+# Function to slugify a string to be used as a directory name
+def slugify(value):
+    value = str(value).strip().lower()
+    value = re.sub(r"[^a-z0-9-]", "-", value)
+    value = re.sub(r"-+", "-", value)
+    return value
+
+
+# Function to get the current Azure subscription name
+def get_subscription_name():
+    try:
+        result = subprocess.run(
+            ["az", "account", "show", "--query", "name", "-o", "tsv"],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        subscription_name = result.stdout.strip()
+        if not subscription_name:
+            logging.error("Failed to get the Azure subscription name.")
+            sys.exit(1)
+        return subscription_name
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error getting Azure subscription name: {e}")
+        sys.exit(1)
+
+
 # Main function to process all resource groups
 def process_all_resource_groups():
     try:
+        subscription_name = get_subscription_name()
+        slugified_subscription_name = slugify(subscription_name)
+        output_dir = os.path.join(OUTPUT_DIR, slugified_subscription_name)
+        os.makedirs(output_dir, exist_ok=True)
+
         result = subprocess.run(
             ["az", "group", "list", "--query", "[].name", "-o", "tsv"],
             stdout=subprocess.PIPE,
@@ -243,7 +274,13 @@ def process_all_resource_groups():
             return
 
         # List of resource groups to exclude
-        excluded_resource_groups = ["NetworkWatcherRG"]
+        excluded_resource_groups = [
+            "NetworkWatcherRG",
+            "AzureBackupRG_centralus_1",
+            "dashboards",
+            "LogAnalyticsDefaultResources",
+            "DefaultResourceGroup-CUS"
+        ]
 
         # Filter out the excluded resource groups
         filtered_resource_groups = [
@@ -251,7 +288,7 @@ def process_all_resource_groups():
         ]
 
         for rg in filtered_resource_groups:
-            rg_dir = os.path.join(OUTPUT_DIR, rg)
+            rg_dir = os.path.join(output_dir, rg)
 
             template_path = os.path.exists(os.path.join(rg_dir, "template.json"))
             markdown_path = os.path.exists(os.path.join(rg_dir, "summary.md"))
@@ -262,7 +299,7 @@ def process_all_resource_groups():
                 )
                 continue
 
-            rg_dir = export_template(rg, OUTPUT_DIR)
+            rg_dir = export_template(rg, output_dir)
             if rg_dir:
                 if not markdown_path:
                     generate_markdown_for_resource_group(rg_dir, rg)
