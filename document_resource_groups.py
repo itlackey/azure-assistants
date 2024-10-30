@@ -80,32 +80,60 @@ def extract_tags(template_content):
 
 
 # Function to filter out specific resource types from the ARM template
-def filter_resources(template_content, excluded_resource_types):
-    filtered_resources = [
-        resource
-        for resource in template_content.get("resources", [])
-        if resource.get("type") not in excluded_resource_types
-    ]
-    template_content["resources"] = filtered_resources
-    return template_content
+def filter_resources(template_content):
 
-
-# Function to send the ARM template and parameters to OpenAI-compatible API and get the summary
-def get_summary(template_file, resource_group_name, retry_count=3):
-
-    with open(template_file, "r") as tf:
-        template_content = json.load(tf)
-
+    # TODO: Read this from a file, the file name should be able to be passed via a CLI arg or default to .types-exclude
     # Filter out specific resource types
     excluded_resource_types = [
         "Microsoft.DBforMySQL/flexibleServers/backups",
         "Microsoft.DBforMySQL/flexibleServers/backupsv2",
         "Microsoft.DBforMySQL/flexibleServers/configurations",
         "Microsoft.Web/sites/deployments",
+        "Microsoft.OperationalInsights/workspaces/savedSearches",
+        "Microsoft.OperationalInsights/workspaces/tables",
+        "Microsoft.DataProtection/backupVaults/backupInstances",
+        "microsoft.insights/scheduledqueryrules",
+        "Microsoft.Compute/snapshots",
+        "microsoft.insights/actionGroups",
+        "Microsoft.Compute/sshPublicKeys",
     ]
-    filtered_template_content = filter_resources(
-        template_content, excluded_resource_types
-    )
+
+    # TODO: Read this from a file, the file name should be able to be passed via a CLI arg or default to .types-include
+    # Only include these resource types, if any are listed
+    included_resource_types = []
+
+    ## Example of only summarizing CongnitiveServices
+    # included_resource_types = [
+    #     "Microsoft.CognitiveServices/accounts/raiPolicies",
+    #     "Microsoft.CognitiveServices/accounts/defenderForAISettings",
+    #     "Microsoft.CognitiveServices/accounts/deployments",
+    # ]
+
+    filtered_resources = [
+        resource
+        for resource in template_content.get("resources", [])
+        if resource.get("type") not in excluded_resource_types
+        and (
+            len(included_resource_types) == 0
+            or resource.get("type") in included_resource_types
+        )
+    ]
+
+    # TODO: Remove the value of properties.publicKey for all resources of type "Microsoft.Compute/sshPublicKeys" to reduce token cost
+    # TODO: Remove any values that may contain sensitive data
+    # excluded_properties = []
+
+    template_content["resources"] = filtered_resources
+    return template_content
+
+
+# Function to send the ARM template and parameters to OpenAI-compatible API and get the summary
+def get_summary(template_file, resource_group_name, retry_count=1):
+
+    with open(template_file, "r") as tf:
+        template_content = json.load(tf)
+
+    filtered_template_content = filter_resources(template_content)
 
     azure_tags = extract_tags(filtered_template_content)
 
@@ -141,16 +169,16 @@ def generate_front_matter(resource_group_name, azure_tags):
     title = f"Resource Group: {resource_group_name}"
     date = datetime.now().strftime("%Y-%m-%d")
 
-    front_matter = f"---\n"
+    front_matter = "---\n"
     front_matter += f'title: "{title}"\n'
     front_matter += f"date: {date}\n"
-    front_matter += f"internal: true\n"
+    front_matter += "internal: true\n"
 
-    front_matter += f"azureTags:\n"
+    front_matter += "azureTags:\n"
     for key, value in azure_tags.items():
         front_matter += f"  {key}: {value}\n"
 
-    front_matter += f"---\n\n"
+    front_matter += "---\n\n"
     return front_matter
 
 
@@ -175,7 +203,7 @@ def export_template(resource_group_name, output_dir):
         "export",
         "--name",
         resource_group_name,
-        "--include-parameter-default-value",
+        # "--include-parameter-default-value", # TODO: allow this to be an arg set via the CLI
         "--output",
         "json",
     ]
@@ -273,13 +301,14 @@ def process_all_resource_groups():
             logging.warning("No resource groups found.")
             return
 
+        # TODO: Read this from a file, the file name should be able to be passed via a CLI arg or default to .rg-exclude
         # List of resource groups to exclude
         excluded_resource_groups = [
             "NetworkWatcherRG",
             "AzureBackupRG_centralus_1",
             "dashboards",
             "LogAnalyticsDefaultResources",
-            "DefaultResourceGroup-CUS"
+            "DefaultResourceGroup-CUS",
         ]
 
         # Filter out the excluded resource groups
