@@ -96,6 +96,9 @@ def filter_resources(template_content):
         "Microsoft.Compute/snapshots",
         "microsoft.insights/actionGroups",
         "Microsoft.Compute/sshPublicKeys",
+        "Microsoft.CognitiveServices/accounts/raiPolicies",
+        "Microsoft.CognitiveServices/accounts/defenderForAISettings",
+        "Microsoft.CognitiveServices/accounts/deployments",
     ]
 
     # TODO: Read this from a file, the file name should be able to be passed via a CLI arg or default to .types-include
@@ -252,6 +255,7 @@ def generate_markdown_for_resource_group(rg_dir, resource_group_name):
     with open(markdown_file, "w") as md:
         md.write(front_matter)
         md.write(summary)
+        md.write("\n\n**Note:** This document was generated using the Azure Assistants script and an LLM")
 
     logging.info(f"Markdown summary saved to {markdown_file}")
 
