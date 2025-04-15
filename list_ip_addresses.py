@@ -3,6 +3,7 @@
 import json
 import subprocess
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
 
 OUTPUT_FILE = "azure_ip_addresses.csv"
 
@@ -135,16 +136,20 @@ def get_private_dns_records():
 
 def main():
     print("Starting IP address collection...")
-    all_rows = (
-        get_vm_ips() +
-        get_public_ips() +
-        get_app_gateway_ips() +
-        get_private_endpoints() +
-        get_mysql_ips() +
-        get_postgres_ips() +
-        get_private_dns_records() +
-        get_network_interface_ips()
-    )
+    with ThreadPoolExecutor() as executor:
+        futures = [
+            executor.submit(get_vm_ips),
+            executor.submit(get_public_ips),
+            executor.submit(get_app_gateway_ips),
+            executor.submit(get_private_endpoints),
+            executor.submit(get_mysql_ips),
+            executor.submit(get_postgres_ips),
+            executor.submit(get_private_dns_records),
+            executor.submit(get_network_interface_ips),
+        ]
+        all_rows = []
+        for future in futures:
+            all_rows.extend(future.result())
 
     print("Writing results to CSV...")
     df = pd.DataFrame(all_rows, columns=["ResourceType", "ResourceName", "ResourceGroup", "Location", "IPAddress", "IPType"])
@@ -153,9 +158,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-#az network private-dns zone show --resource-group i2-redcap-main-rg --name privatelink.mysql.database.azure.com
-#az network private-dns link vnet show --resource-group i2-redcap-main-rg --zone-name privatelink.mysql.database.azure.com --name kve3vjofq6p4s
