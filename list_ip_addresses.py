@@ -140,8 +140,21 @@ def get_app_service_ips():
         name, rg, location = app["name"], app["resourceGroup"], app["location"]
         # Fetch public IP address if available
         default_host_name = app.get("defaultHostName")
-        if default_host_name:
-            rows.append(["AppService", name, rg, location, default_host_name, "Public"])
+        custom_domains = app.get("customDomains", [])
+        public_ip = None
+
+        if custom_domains:
+            for domain in custom_domains:
+                rows.append(["AppService", name, rg, location, domain, "CustomDomain"])
+        elif default_host_name:
+            rows.append(["AppService", name, rg, location, default_host_name, "DefaultHostName"])
+
+        # Attempt to fetch the public IP address
+        outbound_ip_addresses = app.get("outboundIpAddresses", "")
+        if outbound_ip_addresses:
+            public_ip = outbound_ip_addresses.split(",")[0]  # Use the first outbound IP
+            rows.append(["AppService", name, rg, location, public_ip, "Outbound"])
+
         # Fetch VNet Integration details
         vnet_integration = run_az(["webapp", "vnet-integration", "list", "--name", name, "-g", rg])
         for vnet in vnet_integration:
