@@ -5,8 +5,6 @@ import subprocess
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
-OUTPUT_FILE = "azure_ip_addresses.csv"
-
 def run_az(command: list[str]) -> list[dict]:
     print(f"Running command: {' '.join(['az'] + command)}")
     result = subprocess.run(["az"] + command + ["-o", "json"], capture_output=True, text=True)
@@ -134,18 +132,82 @@ def get_private_dns_records():
                     rows.append(["PrivateDNSZone", record_name, rg, zone_name, ip, "Private"])
     return rows
 
+def get_app_service_ips():
+    print("Fetching App Service IP addresses...")
+    rows = []
+    app_services = run_az(["webapp", "list"])
+    for app in app_services:
+        name, rg, location = app["name"], app["resourceGroup"], app["location"]
+        # Fetch public IP address if available
+        default_host_name = app.get("defaultHostName")
+        if default_host_name:
+            rows.append(["AppService", name, rg, location, default_host_name, "Public"])
+        # Fetch VNet Integration details
+        vnet_integration = run_az(["webapp", "vnet-integration", "list", "--name", name, "-g", rg])
+        for vnet in vnet_integration:
+            subnet_id = vnet.get("name")
+            if subnet_id:
+                rows.append(["AppService", name, rg, location, subnet_id, "VNetIntegration"])
+    return rows
+
+def get_mysql_vnet_integration():
+    print("Fetching MySQL Flexible Server VNet Integration information...")
+    rows = []
+    mysql_servers = run_az(["mysql", "flexible-server", "list"])
+    for server in mysql_servers:
+        name, rg, location = server["name"], server["resourceGroup"], server["location"]
+        network = server.get("network", {})
+        delegated_subnet_id = network.get("delegatedSubnetResourceId")
+        if delegated_subnet_id:
+            # Extract the subnet name from the delegated subnet resource ID
+            subnet_name = delegated_subnet_id.split("/subnets/")[-1]
+            rows.append(["MySQLFlexibleServer", name, rg, location, subnet_name, "VNetIntegration"])
+    return rows
+
+def get_postgres_vnet_integration():
+    print("Fetching PostgreSQL Flexible Server VNet Integration information...")
+    rows = []
+    postgres_servers = run_az(["postgres", "server", "list"])
+    for server in postgres_servers:
+        name, rg, location = server["name"], server["resourceGroup"], server["location"]
+        vnet = server.get("name")
+        if vnet:
+            rows.append(["PostgreSQLServer", name, rg, location, vnet, "VNetIntegration"])
+    return rows
+
+def get_subnet_ips():
+    print("Fetching Subnet IP addresses...")
+    rows = []
+    vnets = run_az(["network", "vnet", "list"])
+    for vnet in vnets:
+        name, rg, location = vnet["name"], vnet["resourceGroup"], vnet["location"]
+        subnets = run_az(["network", "vnet", "subnet", "list", "--vnet-name", name, "-g", rg])
+        for subnet in subnets:
+            subnet_name = subnet["name"]
+            address_prefix = subnet.get("addressPrefix")
+            if address_prefix:
+                rows.append(["Subnet", subnet_name, rg, location, address_prefix, "Private"])
+    return rows
+
 def main():
-    print("Starting IP address collection...")
+    print("Starting IP address and VNet Integration collection...")
+    subscription_id = run_az(["account", "show", "--query", "name", "-o", "tsv"]).strip()
+    output_file = f"{subscription_id}.csv"
+
     with ThreadPoolExecutor() as executor:
         futures = [
-            executor.submit(get_vm_ips),
             executor.submit(get_public_ips),
-            executor.submit(get_app_gateway_ips),
-            executor.submit(get_private_endpoints),
-            executor.submit(get_mysql_ips),
-            executor.submit(get_postgres_ips),
+            executor.submit(get_subnet_ips),
             executor.submit(get_private_dns_records),
+            executor.submit(get_app_gateway_ips),
             executor.submit(get_network_interface_ips),
+            executor.submit(get_private_endpoints),
+            executor.submit(get_vm_ips),
+            executor.submit(get_mysql_ips),
+            executor.submit(get_mysql_vnet_integration),
+            executor.submit(get_postgres_ips),
+            executor.submit(get_postgres_vnet_integration),
+            executor.submit(get_app_service_ips),
         ]
         all_rows = []
         for future in futures:
@@ -153,8 +215,8 @@ def main():
 
     print("Writing results to CSV...")
     df = pd.DataFrame(all_rows, columns=["ResourceType", "ResourceName", "ResourceGroup", "Location", "IPAddress", "IPType"])
-    df.to_csv(OUTPUT_FILE, index=False)
-    print(f"Saved {len(df)} records to {OUTPUT_FILE}")
+    df.to_csv(output_file, index=False)
+    print(f"Saved {len(df)} records to {output_file}")
 
 if __name__ == "__main__":
     main()
